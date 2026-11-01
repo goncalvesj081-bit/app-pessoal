@@ -3,14 +3,14 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, ChevronDown, FileUp, RefreshCw } from "lucide-react";
-import { findExisting, importTransactions } from "@/app/(app)/financeiro/actions";
+import { findExisting, findTransferMatches, importTransactions } from "@/app/(app)/financeiro/actions";
 import { decodeFile, parseStatement, ParseError, withExternalIds, type ParsedRow } from "@/lib/finance/parse";
-import { suggestCategory, type Rule } from "@/lib/finance/categorize";
+import { isOwnTransfer, suggestCategory, type Rule } from "@/lib/finance/categorize";
 import { billMonthFor, monthLabel, shiftMonth } from "@/lib/finance/billing";
 import { formatBRL } from "@/lib/finance/money";
-import { REASON_LABEL, ruleKey, type InternalReason } from "@/lib/finance/text";
+import { isTransferLike, REASON_LABEL, ruleKey, type InternalReason } from "@/lib/finance/text";
 import { BANKS, type Account, type Category } from "@/lib/finance/types";
-import { CategorySelect } from "./transactions";
+import { CategorySelect, TRANSFER } from "./transactions";
 
 type Row = ParsedRow & {
   externalId: string;
@@ -18,6 +18,8 @@ type Row = ParsedRow & {
   include: boolean;
   categoryId: string | null;
   suggested: string | null;
+  linkedId?: string; // o outro lado da transferência, em outra conta sua
+  learnTransfer?: boolean; // você marcou como "entre minhas contas"
 };
 
 type Group = { key: string; label: string; idx: number[]; total: number; categoryId: string | null };
@@ -35,11 +37,13 @@ export function ImportWizard({
   categories,
   rules,
   checkExisting = findExisting,
+  checkTransfers = findTransferMatches,
 }: {
   accounts: Account[];
   categories: Category[];
   rules: Rule[];
   checkExisting?: (accountId: string, ids: string[]) => Promise<string[]>;
+  checkTransfers?: typeof findTransferMatches;
 }) {
   const router = useRouter();
   const [accountId, setAccountId] = useState(accounts[0].id);
@@ -63,13 +67,26 @@ export function ImportWizard({
       const parsed = parseStatement(decodeFile(await f.arrayBuffer()), f.name);
       const withIds = await withExternalIds(parsed.rows);
       const existing = new Set(await checkExisting(accountId, withIds.map((r) => r.externalId)));
-      setRows(
-        withIds.map((r) => {
-          const suggested = r.kind === "normal" ? suggestCategory(r.description, r.amount, rules, categories) : null;
-          const duplicate = existing.has(r.externalId);
-          return { ...r, duplicate, include: !duplicate, categoryId: suggested, suggested };
-        }),
-      );
+      const prepared: Row[] = withIds.map((r) => {
+        const duplicate = existing.has(r.externalId);
+        // Pessoa que você já marcou como "entre minhas contas"
+        if (r.kind === "normal" && isOwnTransfer(r.description, rules)) {
+          return { ...r, kind: "transfer", reason: "entre_contas", duplicate, include: !duplicate, categoryId: null, suggested: null };
+        }
+        const suggested = r.kind === "normal" ? suggestCategory(r.description, r.amount, rules, categories) : null;
+        return { ...r, duplicate, include: !duplicate, categoryId: suggested, suggested };
+      });
+      // Transferência que bate com o "outro lado" já importado em outra conta sua
+      if (!isCardAccount) {
+        const items = prepared
+          .map((r, i) => ({ r, i }))
+          .filter(({ r }) => !r.duplicate && r.kind === "normal" && isTransferLike(r.description))
+          .map(({ r, i }) => ({ i, date: r.date, amount: r.amount }));
+        for (const m of await checkTransfers(accountId, items)) {
+          prepared[m.i] = { ...prepared[m.i], kind: "transfer", reason: "entre_contas", categoryId: null, linkedId: m.otherId };
+        }
+      }
+      setRows(prepared);
       setFile({ name: f.name, format: parsed.format, isCard: parsed.isCard });
       if (isCardAccount) {
         const last = withIds.map((r) => r.date).sort().at(-1)!;
@@ -117,7 +134,20 @@ export function ImportWizard({
   }, [rows]);
 
   const setGroupCategory = (g: Group, categoryId: string | null) =>
-    setRows((rs) => rs.map((r, i) => (g.idx.includes(i) ? { ...r, categoryId } : r)));
+    setRows((rs) =>
+      rs.map((r, i) => {
+        if (!g.idx.includes(i)) return r;
+        if (categoryId === TRANSFER) return { ...r, kind: "transfer", reason: "entre_contas", categoryId: null, learnTransfer: true };
+        return { ...r, categoryId };
+      }),
+    );
+  // Volta a contar como gasto/receita normal
+  const unmarkTransfer = (i: number) =>
+    setRows((rs) =>
+      rs.map((r, idx) =>
+        idx === i ? { ...r, kind: "normal", reason: null, linkedId: undefined, learnTransfer: false, categoryId: r.suggested } : r,
+      ),
+    );
   const toggleRow = (i: number) => setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, include: !r.include } : r)));
 
   const selected = rows.filter((r) => r.include);
@@ -144,6 +174,8 @@ export function ImportWizard({
             installment: r.installment,
             learn: !!r.categoryId && r.categoryId !== r.suggested,
           })),
+          linkTransfers: selected.filter((r) => r.linkedId && r.kind === "transfer").map((r) => r.linkedId!),
+          transferPeople: selected.filter((r) => r.learnTransfer && r.kind === "transfer").map((r) => r.description),
         });
         router.push(`/financeiro/lancamentos?i=${res.importId}`);
       } catch (e) {
@@ -280,7 +312,7 @@ export function ImportWizard({
       {internalCount > 0 && (
         <Collapsible
           title={`Não contam como gasto nem receita (${internalCount})`}
-          hint="Dinheiro que só mudou de lugar: Pix no crédito (o gasto aparece na fatura do cartão), Caixinha e pagamento de fatura. São guardados, mas ficam fora das contas do mês."
+          hint="Dinheiro que só mudou de lugar: entre suas contas, Pix no crédito (o gasto aparece na fatura do cartão), Caixinha e pagamento de fatura. São guardados, mas ficam fora das contas do mês."
         >
           <div className="space-y-3">
             {[...view.internal].map(([reason, idx]) => (
@@ -288,7 +320,12 @@ export function ImportWizard({
                 <p className="mb-1 px-1 text-xs font-medium text-muted">{REASON_LABEL[reason]} ({idx.length})</p>
                 <ul className="divide-y divide-border rounded-xl border border-border bg-surface">
                   {idx.map((i) => (
-                    <SimpleRow key={i} r={rows[i]} onToggle={() => toggleRow(i)} />
+                    <SimpleRow
+                      key={i}
+                      r={rows[i]}
+                      onToggle={() => toggleRow(i)}
+                      onUnmark={reason === "entre_contas" ? () => unmarkTransfer(i) : undefined}
+                    />
                   ))}
                 </ul>
               </div>
@@ -375,7 +412,14 @@ function GroupRow({
             <ChevronDown size={12} className={`transition ${open ? "rotate-180" : ""}`} />
           </p>
         </button>
-        <CategorySelect value={g.categoryId} categories={categories} amount={amount} onChange={(v) => onCategory(g, v)} className="max-w-44" />
+        <CategorySelect
+          value={g.categoryId}
+          categories={categories}
+          amount={amount}
+          onChange={(v) => onCategory(g, v)}
+          className="max-w-44"
+          transferOption={isTransferLike(g.label)}
+        />
         <span className={`w-24 text-right text-sm tabular-nums ${g.total > 0 ? "text-success" : ""}`}>{formatBRL(g.total)}</span>
       </div>
       {open && (
@@ -389,7 +433,7 @@ function GroupRow({
   );
 }
 
-function SimpleRow({ r, onToggle, showRaw }: { r: Row; onToggle?: () => void; showRaw?: boolean }) {
+function SimpleRow({ r, onToggle, showRaw, onUnmark }: { r: Row; onToggle?: () => void; showRaw?: boolean; onUnmark?: () => void }) {
   return (
     <li className={`flex items-center gap-3 px-4 py-2 text-sm ${r.include ? "" : "opacity-50"}`}>
       {onToggle && (
@@ -400,6 +444,11 @@ function SimpleRow({ r, onToggle, showRaw }: { r: Row; onToggle?: () => void; sh
         {showRaw ? r.raw : r.description}
         {r.installment ? ` · parcela ${r.installment[0]}/${r.installment[1]}` : ""}
       </span>
+      {onUnmark && (
+        <button onClick={onUnmark} className="shrink-0 text-xs text-accent hover:underline" title="Não é entre minhas contas: contar como gasto/receita">
+          contar
+        </button>
+      )}
       <span className={`shrink-0 tabular-nums ${r.amount > 0 ? "text-success" : ""}`}>{formatBRL(r.amount)}</span>
     </li>
   );

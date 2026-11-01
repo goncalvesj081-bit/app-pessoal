@@ -107,7 +107,7 @@ export function cleanDescription(raw: string): string {
 export const PIX_CREDIT = /valor adicionado na conta por cart[aã]o de cr[eé]dito/i;
 const SAVINGS = /\b(aplica[cç][aã]o|resgate)\s+(rdb|cdb|em caixinha|da caixinha|caixinha)\b|dinheiro (guardado|resgatado)|\bcaixinha\b/i;
 
-export type InternalReason = "pix_credito" | "caixinha" | "fatura";
+export type InternalReason = "pix_credito" | "caixinha" | "fatura" | "entre_contas";
 
 export function internalReason(raw: string): InternalReason | null {
   if (PIX_CREDIT.test(raw)) return "pix_credito";
@@ -120,4 +120,19 @@ export const REASON_LABEL: Record<InternalReason, string> = {
   pix_credito: "Pix no crédito",
   caixinha: "Caixinha / investimento",
   fatura: "Pagamento de fatura",
+  entre_contas: "Entre minhas contas",
 };
+
+// Para Pix/transferências com pessoa: "pessoa nome sobrenome" (igual para enviado e recebido)
+export function personKey(description: string): string | null {
+  const words = normalizeKey(description).split(" ").filter((w) => w.length > 1);
+  const prefixes = [["pix", "enviado"], ["pix", "recebido"], ["transferencia", "enviada"], ["transferencia", "recebida"], ["reembolso", "pix"]];
+  if (!prefixes.some(([a, b]) => words[0] === a && words[1] === b)) return null;
+  const name = words.slice(2).filter((w) => !SMALL.has(w)).slice(0, 2);
+  return name.length ? "pessoa " + name.join(" ") : null;
+}
+
+// Parece transferência (Pix, TED, DOC...)?
+export function isTransferLike(description: string) {
+  return personKey(description) !== null || /\b(pix|ted|doc|transf\w*)\b/.test(normalizeKey(description));
+}

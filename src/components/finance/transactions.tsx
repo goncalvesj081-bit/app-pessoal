@@ -13,18 +13,22 @@ import {
 import { formatBRL } from "@/lib/finance/money";
 import { TX_KINDS, type Account, type Category, type Transaction, type TxKind } from "@/lib/finance/types";
 
+export const TRANSFER = "__transfer";
+
 export function CategorySelect({
   value,
   categories,
   amount,
   onChange,
   className = "",
+  transferOption = false,
 }: {
   value: string | null;
   categories: Category[];
   amount: number;
   onChange: (v: string | null) => void;
   className?: string;
+  transferOption?: boolean;
 }) {
   const primary = amount > 0 ? "income" : "expense";
   const sorted = [...categories].sort((a, b) => (a.kind === b.kind ? 0 : a.kind === primary ? -1 : 1));
@@ -36,6 +40,7 @@ export function CategorySelect({
       aria-label="Categoria"
     >
       <option value="">Sem categoria</option>
+      {transferOption && <option value={TRANSFER}>↔ Entre minhas contas (não conta)</option>}
       {sorted.map((c) => (
         <option key={c.id} value={c.id}>
           {c.name}
@@ -76,7 +81,7 @@ export function TransactionRow({ tx, accountName, categories }: { tx: Transactio
         ) : null}
         <select
           value={tx.kind}
-          onChange={(e) => start(() => setTransactionKind(tx.id, e.target.value as TxKind))}
+          onChange={(e) => start(() => setTransactionKind(tx.id, e.target.value as TxKind, tx.description))}
           className={`max-w-32 rounded-md border border-border bg-surface px-1.5 py-1 text-xs ${muted ? "text-accent" : "text-muted"}`}
           aria-label="Tipo"
           title="Marque como pagamento de fatura ou transferência entre suas contas para não contar como gasto"

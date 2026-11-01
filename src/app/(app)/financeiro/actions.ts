@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { billMonthFor } from "@/lib/finance/billing";
-import { ruleKey } from "@/lib/finance/text";
+import { isTransferLike, personKey, ruleKey } from "@/lib/finance/text";
 import type { AccountKind, Bank, TxKind } from "@/lib/finance/types";
 
 function refresh() {
@@ -109,11 +109,63 @@ export async function setTransactionCategory(id: string, categoryId: string | nu
   refresh();
 }
 
-export async function setTransactionKind(id: string, kind: TxKind) {
+export async function setTransactionKind(id: string, kind: TxKind, description?: string) {
   const supabase = await createClient();
-  const { error } = await supabase.from("transactions").update({ kind }).eq("id", id);
+  const { error } = await supabase
+    .from("transactions")
+    .update({ kind, notes: kind === "transfer" ? "Entre minhas contas" : null, ...(kind !== "normal" ? { category_id: null } : {}) })
+    .eq("id", id);
   if (error) throw new Error(error.message);
+  if (kind === "transfer" && description) await learnTransferPeople([description]);
   refresh();
+}
+
+// Lembra que Pix/transferências com essa pessoa são entre as suas contas
+async function learnTransferPeople(descriptions: string[]) {
+  const patterns = [...new Set(descriptions.map(personKey).filter((k): k is string => !!k))];
+  if (!patterns.length) return;
+  const supabase = await createClient();
+  await supabase
+    .from("category_rules")
+    .upsert(patterns.map((pattern) => ({ pattern, kind: "transfer", category_id: null })), { onConflict: "user_id,pattern" });
+}
+
+// Procura, nas OUTRAS contas, o "outro lado" de cada transferência (mesmo valor com sinal oposto, até 3 dias)
+export async function findTransferMatches(accountId: string, items: { i: number; date: string; amount: number }[]) {
+  if (items.length === 0) return [];
+  const supabase = await createClient();
+  const dates = items.map((x) => x.date).sort();
+  const shift = (d: string, n: number) => new Date(new Date(d + "T12:00:00Z").getTime() + n * 86400000).toISOString().slice(0, 10);
+
+  type Cand = { id: string; account_id: string; date: string; amount: number; description: string };
+  const cands: Cand[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data } = await supabase
+      .from("transactions")
+      .select("id,account_id,date,amount,description")
+      .neq("account_id", accountId)
+      .eq("kind", "normal")
+      .gte("date", shift(dates[0], -3))
+      .lte("date", shift(dates.at(-1)!, 3))
+      .range(from, from + 999);
+    if (!data?.length) break;
+    cands.push(...data.map((c) => ({ ...c, amount: Number(c.amount) })));
+    if (data.length < 1000) break;
+  }
+
+  const used = new Set<string>();
+  const out: { i: number; otherId: string }[] = [];
+  for (const it of items) {
+    const day = (d: string) => Math.abs(new Date(d).getTime() - new Date(it.date).getTime()) / 86400000;
+    const match = cands
+      .filter((c) => !used.has(c.id) && Math.abs(c.amount + it.amount) < 0.005 && day(c.date) <= 3 && isTransferLike(c.description))
+      .sort((a, b) => day(a.date) - day(b.date))[0];
+    if (match) {
+      used.add(match.id);
+      out.push({ i: it.i, otherId: match.id });
+    }
+  }
+  return out;
 }
 
 export async function deleteTransaction(id: string) {
@@ -171,6 +223,8 @@ export async function importTransactions(input: {
   format: string;
   billMonth: string | null;
   rows: ImportRow[];
+  linkTransfers?: string[]; // ids do "outro lado" (em outras contas) para marcar como entre contas
+  transferPeople?: string[]; // descrições de pessoas que você marcou como "entre minhas contas"
 }) {
   if (input.rows.length === 0) throw new Error("Nenhum lançamento selecionado.");
   if (input.rows.length > 3000) throw new Error("Arquivo grande demais (máximo 3000 lançamentos).");
@@ -215,6 +269,13 @@ export async function importTransactions(input: {
     .eq("id", imp.id);
 
   await learnRules(input.rows.filter((r) => r.learn && r.categoryId).map((r) => ({ description: r.description, categoryId: r.categoryId! })));
+  if (input.transferPeople?.length) await learnTransferPeople(input.transferPeople);
+  if (input.linkTransfers?.length) {
+    await supabase
+      .from("transactions")
+      .update({ kind: "transfer", notes: "Entre minhas contas", category_id: null })
+      .in("id", input.linkTransfers.slice(0, 3000));
+  }
   refresh();
   return { importId: imp.id, inserted: insertedCount, skipped: payload.length - insertedCount };
 }

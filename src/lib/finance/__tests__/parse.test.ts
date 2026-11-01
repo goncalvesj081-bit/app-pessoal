@@ -256,3 +256,33 @@ describe("extrato Nubank real (formato das descrições)", () => {
     expect(fat[0]).toMatchObject({ kind: "normal", amount: -7 });
   });
 });
+
+import { personKey, isTransferLike } from "../text";
+import { isOwnTransfer } from "../categorize";
+
+describe("entre minhas contas", () => {
+  it("mesma pessoa, enviado e recebido, mesma chave", () => {
+    expect(personKey("Pix enviado · João Gonçalves da Silva")).toBe("pessoa joao goncalves");
+    expect(personKey("Pix recebido · JOAO GONCALVES DA SILVA")).toBe("pessoa joao goncalves");
+    expect(personKey("Transferência recebida · Joao Goncalves")).toBe("pessoa joao goncalves");
+    expect(personKey("Padaria Pao Dourado")).toBeNull();
+  });
+
+  it("parece transferência", () => {
+    expect(isTransferLike("Pix enviado · Fulano")).toBe(true);
+    expect(isTransferLike("TED RECEBIDA 123")).toBe(true);
+    expect(isTransferLike("Uber *Trip")).toBe(false);
+  });
+
+  it("regra de transferência marca os dois sentidos", () => {
+    const rules = [{ pattern: "pessoa joao goncalves", category_id: null, kind: "transfer" as const }];
+    expect(isOwnTransfer("Pix recebido · Joao Goncalves", rules)).toBe(true);
+    expect(isOwnTransfer("Pix enviado · Joao Goncalves Silva", rules)).toBe(true);
+    expect(isOwnTransfer("Pix enviado · Maria Souza", rules)).toBe(false);
+  });
+
+  it("regra de transferência não vira sugestão de categoria", () => {
+    const rules = [{ pattern: "pix enviado joao goncalves", category_id: null, kind: "transfer" as const }];
+    expect(suggestCategory("Pix enviado · Joao Goncalves", -10, rules, [])).toBeNull();
+  });
+});

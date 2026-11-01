@@ -49,5 +49,5 @@ export const KINDS: Record<AccountKind, string> = {
 export const TX_KINDS: Record<TxKind, string> = {
   normal: "Normal",
   card_payment: "Pagamento de fatura",
-  transfer: "Transferência entre contas",
+  transfer: "Entre minhas contas (não conta)",
 };

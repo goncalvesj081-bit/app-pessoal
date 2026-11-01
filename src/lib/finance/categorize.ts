@@ -1,7 +1,7 @@
-import { normalizeKey, ruleKey } from "./text";
+import { normalizeKey, personKey, ruleKey } from "./text";
 
 export type CategoryLite = { id: string; name: string; kind: "expense" | "income" };
-export type Rule = { pattern: string; category_id: string };
+export type Rule = { pattern: string; category_id: string | null; kind?: "normal" | "transfer" };
 
 // Palavras-chave iniciais (antes de o sistema aprender com você)
 const BUILTIN: [RegExp, string][] = [
@@ -27,9 +27,10 @@ export function suggestCategory(description: string, amount: number, rules: Rule
   // 1) Regras que você ensinou (a mais específica ganha)
   const key = ruleKey(description);
   const match = rules
+    .filter((r) => r.kind !== "transfer" && r.category_id)
     .filter((r) => key === r.pattern || key.startsWith(r.pattern + " "))
     .sort((a, b) => b.pattern.length - a.pattern.length)[0];
-  if (match) return match.category_id;
+  if (match) return match.category_id!;
 
   // 2) Palavras-chave padrão
   const text = " " + normalizeKey(description) + " ";
@@ -42,4 +43,10 @@ export function suggestCategory(description: string, amount: number, rules: Rule
     }
   }
   return null;
+}
+
+// Você já marcou essa pessoa como "entre minhas contas"?
+export function isOwnTransfer(description: string, rules: Rule[]) {
+  const key = personKey(description);
+  return !!key && rules.some((r) => r.kind === "transfer" && r.pattern === key);
 }
