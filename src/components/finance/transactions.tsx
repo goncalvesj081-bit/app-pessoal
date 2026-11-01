@@ -54,10 +54,11 @@ export function TransactionRow({ tx, accountName, categories }: { tx: Transactio
   return (
     <li className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5 ${pending ? "opacity-60" : ""}`}>
       <div className="min-w-0 flex-1 basis-48">
-        <p className={`truncate text-sm ${muted ? "text-muted" : ""}`} title={tx.description}>{tx.description}</p>
+        <p className={`truncate text-sm ${muted ? "text-muted" : ""}`} title={tx.raw_description ?? tx.description}>{tx.description}</p>
         <p className="text-xs text-muted">
           {accountName}
           {tx.installment_total ? ` · parcela ${tx.installment_current}/${tx.installment_total}` : ""}
+          {muted && tx.notes ? ` · ${tx.notes} (não conta no mês)` : ""}
         </p>
       </div>
       <div className="flex items-center gap-2">

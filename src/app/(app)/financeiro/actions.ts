@@ -141,6 +141,8 @@ async function learnRules(items: { description: string; categoryId: string }[]) 
 export type ImportRow = {
   date: string;
   description: string;
+  raw: string;
+  note: string | null;
   amount: number;
   externalId: string;
   categoryId: string | null;
@@ -185,6 +187,8 @@ export async function importTransactions(input: {
     account_id: input.accountId,
     date: r.date,
     description: r.description.slice(0, 300),
+    raw_description: r.raw.slice(0, 500),
+    notes: r.note,
     amount: r.amount,
     category_id: r.categoryId,
     kind: r.kind,

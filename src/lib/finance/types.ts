@@ -28,6 +28,8 @@ export type Transaction = {
   installment_current: number | null;
   installment_total: number | null;
   import_id: string | null;
+  raw_description?: string | null;
+  notes?: string | null;
 };
 
 export const BANKS: Record<Bank, string> = {

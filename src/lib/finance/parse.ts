@@ -1,15 +1,17 @@
 // Lê extratos e faturas (OFX e CSV) e devolve uma lista padronizada de lançamentos.
 import { parseCSV } from "./csv";
 import { parseAmount, parseDate } from "./money";
-import { detectInstallment, isCardPayment, normalizeKey } from "./text";
+import { cleanDescription, detectInstallment, internalReason, normalizeKey, type InternalReason } from "./text";
 
 export type ParsedRow = {
   date: string; // aaaa-mm-dd
-  description: string;
+  description: string; // limpa, para mostrar
+  raw: string; // como veio no arquivo
   amount: number; // < 0 saída, > 0 entrada
   externalId: string | null; // id do banco, quando existe
   installment: [number, number] | null;
-  kind: "normal" | "card_payment";
+  kind: "normal" | "card_payment" | "transfer";
+  reason: InternalReason | null; // por que não conta como gasto/receita
 };
 
 export type ParseResult = {
@@ -32,19 +34,45 @@ export function decodeFile(buffer: ArrayBuffer): string {
 export function parseStatement(text: string, filename = ""): ParseResult {
   const isOfx = /<OFX>/i.test(text) || /^OFXHEADER/m.test(text) || /\.ofx$/i.test(filename);
   const result = isOfx ? parseOFX(text) : parseCsvStatement(text);
-  result.rows = result.rows.map(finish);
+  result.rows = pairPixCredit(result.rows.map(finish));
   if (result.rows.length === 0) throw new ParseError("Não encontrei nenhum lançamento nesse arquivo.");
   return result;
 }
 
 function finish(row: ParsedRow): ParsedRow {
-  const description = row.description.replace(/\s+/g, " ").trim().slice(0, 300) || "(sem descrição)";
+  const raw = row.raw.replace(/\s+/g, " ").trim().slice(0, 500) || "(sem descrição)";
+  const reason = internalReason(raw);
   return {
     ...row,
-    description,
-    installment: row.installment ?? detectInstallment(description),
-    kind: isCardPayment(description) ? "card_payment" : row.kind,
+    raw,
+    description: cleanDescription(raw).slice(0, 300),
+    installment: row.installment ?? detectInstallment(raw),
+    kind: reason === "fatura" ? "card_payment" : reason ? "transfer" : row.kind,
+    reason,
   };
+}
+
+// Pix no crédito (Nubank): entra "Valor adicionado na conta por cartão de crédito" e sai o Pix
+// no mesmo valor. Os dois se anulam na conta; o gasto real aparece na fatura do cartão.
+function pairPixCredit(rows: ParsedRow[]): ParsedRow[] {
+  const used = new Set<number>();
+  rows.forEach((r, i) => {
+    if (r.reason !== "pix_credito" || r.amount <= 0) return;
+    const candidates = rows
+      .map((o, j) => ({ o, j }))
+      .filter(({ o, j }) => !used.has(j) && j !== i && o.kind === "normal" && Math.abs(o.amount + r.amount) < 0.005)
+      .sort((a, b) => dayDiff(a.o.date, r.date) - dayDiff(b.o.date, r.date) || Math.abs(a.j - i) - Math.abs(b.j - i));
+    const match = candidates.find(({ o }) => dayDiff(o.date, r.date) <= 1);
+    if (match) {
+      used.add(match.j);
+      rows[match.j] = { ...match.o, kind: "transfer", reason: "pix_credito" };
+    }
+  });
+  return rows;
+}
+
+function dayDiff(a: string, b: string) {
+  return Math.abs(new Date(a).getTime() - new Date(b).getTime()) / 86400000;
 }
 
 /* ---------------- OFX ---------------- */
@@ -69,11 +97,13 @@ export function parseOFX(text: string): ParseResult {
     const fitid = ofxTag(block, "FITID");
     rows.push({
       date,
-      description: decodeEntities(description),
+      description: "",
+      raw: decodeEntities(description),
       amount,
       externalId: fitid ? `ofx:${fitid}` : null,
       installment: null,
       kind: "normal",
+      reason: null,
     });
   }
   return { format: isCard ? "OFX (cartão)" : "OFX", isCard, rows };
@@ -172,11 +202,13 @@ export function parseCsvStatement(text: string): ParseResult {
 
     rows.push({
       date,
-      description,
+      description: "",
+      raw: description,
       amount,
       externalId: cols.id !== undefined && line[cols.id] ? `csv:${line[cols.id]}` : null,
       installment: null,
       kind: "normal",
+      reason: null,
     });
   }
   return { format, isCard, rows };
@@ -194,7 +226,7 @@ export async function withExternalIds(rows: ParsedRow[]): Promise<(ParsedRow & {
       out.push({ ...r, externalId: r.externalId });
       continue;
     }
-    const base = `${r.date}|${r.amount.toFixed(2)}|${normalizeKey(r.description)}`;
+    const base = `${r.date}|${r.amount.toFixed(2)}|${normalizeKey(r.raw)}`;
     const n = (seen.get(base) ?? 0) + 1;
     seen.set(base, n);
     out.push({ ...r, externalId: `h:${await sha256(`${base}|${n}`)}` });

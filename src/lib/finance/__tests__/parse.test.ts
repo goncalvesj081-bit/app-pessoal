@@ -114,7 +114,7 @@ Data Lançamento;Histórico;Descrição;Valor;Saldo
     const r = parseStatement(csv);
     expect(r.format).toBe("Inter (conta)");
     expect(r.rows).toHaveLength(2);
-    expect(r.rows[0]).toMatchObject({ amount: -1200, description: "Pix enviado - Fulano de Tal" });
+    expect(r.rows[0]).toMatchObject({ amount: -1200, description: "Pix enviado · Fulano de Tal", raw: "Pix enviado - Fulano de Tal" });
   });
 
   it("Inter cartão", () => {
@@ -149,7 +149,7 @@ RELEASE_DATE;TRANSACTION_TYPE;REFERENCE_ID;TRANSACTION_NET_AMOUNT;PARTIAL_BALANC
 04/11/2026;;SALDO DO DIA;1.000,00C`;
     const r = parseStatement(csv);
     expect(r.rows).toHaveLength(2);
-    expect(r.rows[0]).toMatchObject({ amount: -210.33, description: "DEB.CONV.ENERGIA" });
+    expect(r.rows[0]).toMatchObject({ amount: -210.33, raw: "DEB.CONV.ENERGIA" });
     expect(r.rows[1].amount).toBe(80);
   });
 
@@ -209,5 +209,50 @@ describe("parcelas, fatura e categorias", () => {
     const rules = [{ pattern: ruleKey("UBER EATS 123"), category_id: "a" }];
     expect(suggestCategory("Uber Eats *Pedido", -30, rules, cats)).toBe("a");
     expect(suggestCategory("UBER *TRIP", -20, rules, cats)).toBe("t");
+  });
+});
+
+describe("extrato Nubank real (formato das descrições)", () => {
+  const csv = `Data,Valor,Identificador,Descrição
+01/10/2026,7.00,id-1,Valor adicionado na conta por cartão de crédito - Valor adicionado para Pix no Crédito
+01/10/2026,-7.00,id-2,Transferência enviada pelo Pix - ELAINE FERREIRA GONÇALVES - •••.383.946-•• - NU PAGAMENTOS - IP (0260) Agência: 1 Conta: 1234567-8
+01/10/2026,1621.00,id-3,Transferência recebida pelo Pix - ALVARO AUGUSTO DA MATA - •••.541.176-•• - BCO DO BRASIL S.A. (0001) Agência: 1234 Conta: 56789-0
+01/10/2026,-32.00,id-4,Transferência enviada pelo Pix - DEBORA AMARAL NUNES DE FREITAS - •••.111.222-•• - BANCO INTER (0077) Agência: 1 Conta: 999-1
+02/10/2026,-18.00,id-5,Transferência enviada pelo Pix - DEBORA AMARAL NUNES DE FREITAS - •••.111.222-•• - BANCO INTER (0077) Agência: 1 Conta: 999-1
+02/10/2026,-500.00,id-6,Aplicação RDB
+03/10/2026,200.00,id-7,Resgate RDB
+03/10/2026,-45.90,id-8,Compra no débito - PADARIA PAO DOURADO
+04/10/2026,-120.00,id-9,Pagamento de boleto efetuado - CEMIG DISTRIBUICAO`;
+  const rows = parseStatement(csv).rows;
+
+  it("limpa descrições", () => {
+    expect(rows[1].description).toBe("Pix enviado · Elaine Ferreira Gonçalves");
+    expect(rows[2].description).toBe("Pix recebido · Alvaro Augusto da Mata");
+    expect(rows[3].description).toBe("Pix enviado · Debora Amaral Nunes de Freitas");
+    expect(rows[7].description).toBe("Padaria Pao Dourado");
+    expect(rows[8].description).toBe("Boleto · Cemig Distribuicao");
+  });
+
+  it("par do Pix no crédito não conta; outros Pix continuam normais", () => {
+    expect(rows[0]).toMatchObject({ kind: "transfer", reason: "pix_credito" });
+    expect(rows[1]).toMatchObject({ kind: "transfer", reason: "pix_credito" });
+    expect(rows[3].kind).toBe("normal");
+    expect(rows[4].kind).toBe("normal");
+  });
+
+  it("caixinha não conta", () => {
+    expect(rows[5]).toMatchObject({ kind: "transfer", reason: "caixinha" });
+    expect(rows[6]).toMatchObject({ kind: "transfer", reason: "caixinha" });
+  });
+
+  it("mesma pessoa gera a mesma chave de grupo/regra", () => {
+    expect(ruleKey(rows[3].description)).toBe(ruleKey(rows[4].description));
+    expect(ruleKey(rows[3].description)).not.toBe(ruleKey(rows[1].description));
+  });
+
+  it("na fatura, 'Pix no crédito' é gasto normal", () => {
+    const fat = parseStatement(`date,title,amount
+2026-10-01,Pix no crédito - Elaine,7.00`).rows;
+    expect(fat[0]).toMatchObject({ kind: "normal", amount: -7 });
   });
 });

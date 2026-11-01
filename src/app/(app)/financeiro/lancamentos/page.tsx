@@ -16,7 +16,7 @@ export default async function LancamentosPage({ searchParams }: { searchParams: 
 
   let query = supabase
     .from("transactions")
-    .select("id,account_id,date,description,amount,category_id,kind,bill_month,installment_current,installment_total,import_id")
+    .select("id,account_id,date,description,amount,category_id,kind,bill_month,installment_current,installment_total,import_id,raw_description,notes")
     .order("date", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(1000);
