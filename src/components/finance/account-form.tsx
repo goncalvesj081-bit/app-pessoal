@@ -1,8 +1,9 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { Archive, ArchiveRestore, Pencil, Plus } from "lucide-react";
-import { createAccount, setAccountArchived, updateAccount } from "@/app/(app)/financeiro/actions";
+import { Archive, ArchiveRestore, Pencil, Plus, Trash2 } from "lucide-react";
+import { createAccount, deleteAccount, setAccountArchived, updateAccount } from "@/app/(app)/financeiro/actions";
+import { BANKS } from "@/lib/finance/types";
 import { formatBRL } from "@/lib/finance/money";
 import type { Account, AccountKind, Bank } from "@/lib/finance/types";
 
@@ -24,8 +25,8 @@ export function AccountForm({ banks, kinds }: { banks: Record<Bank, string>; kin
           if (!String(fd.get("name") ?? "").trim()) fd.set("name", suggestedName);
           try {
             await createAccount(fd);
-            ref.current?.reset();
-            setKind("checking");
+            const name = ref.current?.elements.namedItem("name") as HTMLInputElement | null;
+            if (name) name.value = "";
           } catch (e) {
             setError((e as Error).message);
           }
@@ -75,7 +76,17 @@ export function AccountForm({ banks, kinds }: { banks: Record<Bank, string>; kin
   );
 }
 
-export function AccountRow({ account: a, bankLabel, balance }: { account: Account; bankLabel: string; balance: number }) {
+export function AccountRow({
+  account: a,
+  bankLabel,
+  balance,
+  txCount,
+}: {
+  account: Account;
+  bankLabel: string;
+  balance: number;
+  txCount: number;
+}) {
   const [editing, setEditing] = useState(false);
   const [pending, start] = useTransition();
 
@@ -92,6 +103,13 @@ export function AccountRow({ account: a, bankLabel, balance }: { account: Accoun
           className="grid gap-2 sm:grid-cols-4"
         >
           <input name="name" defaultValue={a.name} required maxLength={60} className="input sm:col-span-2" aria-label="Nome" />
+          {a.kind !== "wallet" && (
+            <select name="bank" defaultValue={a.bank} className="input sm:col-span-2" aria-label="Banco">
+              {Object.entries(BANKS).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+          )}
           {a.kind === "credit_card" ? (
             <>
               <input name="closing_day" type="number" min={1} max={31} defaultValue={a.closing_day ?? ""} placeholder="Fecha dia" className="input" aria-label="Fecha dia" />
@@ -139,6 +157,20 @@ export function AccountRow({ account: a, bankLabel, balance }: { account: Accoun
         title={a.archived ? "Reativar" : "Arquivar (esconde, mas mantém o histórico)"}
       >
         {a.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
+      </button>
+      <button
+        onClick={() => {
+          const msg =
+            txCount > 0
+              ? `Excluir "${a.name}"? Os ${txCount} lançamento(s) dela também serão apagados. Isso não pode ser desfeito.`
+              : `Excluir "${a.name}"?`;
+          if (confirm(msg)) start(() => deleteAccount(a.id));
+        }}
+        className="text-muted hover:text-danger"
+        aria-label="Excluir"
+        title="Excluir conta"
+      >
+        <Trash2 size={16} />
       </button>
     </li>
   );

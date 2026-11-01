@@ -39,6 +39,7 @@ export async function createAccount(formData: FormData) {
 export async function updateAccount(id: string, formData: FormData) {
   const supabase = await createClient();
   const fields: Record<string, unknown> = { name: String(formData.get("name") ?? "").trim() };
+  if (formData.has("bank")) fields.bank = String(formData.get("bank")) as Bank;
   // Você informa o saldo ATUAL (o que aparece no app do banco hoje);
   // o sistema calcula o saldo inicial = saldo atual - soma de tudo que foi lançado/importado.
   const current = num(formData.get("current_balance"));
@@ -57,6 +58,14 @@ export async function updateAccount(id: string, formData: FormData) {
 export async function setAccountArchived(id: string, archived: boolean) {
   const supabase = await createClient();
   const { error } = await supabase.from("accounts").update({ archived }).eq("id", id);
+  if (error) throw new Error(error.message);
+  refresh();
+}
+
+// Exclui a conta e TODOS os lançamentos/importações dela
+export async function deleteAccount(id: string) {
+  const supabase = await createClient();
+  const { error } = await supabase.from("accounts").delete().eq("id", id);
   if (error) throw new Error(error.message);
   refresh();
 }
