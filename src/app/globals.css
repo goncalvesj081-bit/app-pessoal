@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+/* Cores do app (claro e escuro). Mudou aqui, muda em tudo. */
+:root {
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --fg: #1c1c1a;
+  --muted: #6b6b66;
+  --border: #e6e5e0;
+  --accent: #4f46e5;
+  --accent-fg: #ffffff;
+  --danger: #dc2626;
+  --success: #16a34a;
+  --warning: #d97706;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111110;
+    --surface: #1a1a19;
+    --fg: #ededeb;
+    --muted: #9a9a94;
+    --border: #2b2b29;
+    --accent: #818cf8;
+    --accent-fg: #111110;
+    --danger: #f87171;
+    --success: #4ade80;
+    --warning: #fbbf24;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --font-sans: var(--font-geist-sans);
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+@layer components {
+  .input {
+    @apply w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent;
+  }
+  .btn-primary {
+    @apply rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:opacity-90 disabled:opacity-50;
+  }
+  .card {
+    @apply rounded-xl border border-border bg-surface p-4;
+  }
+}
