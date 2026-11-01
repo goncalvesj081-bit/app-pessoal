@@ -4,7 +4,9 @@ import { BANKS, KINDS } from "@/lib/finance/types";
 import { AccountForm, AccountRow } from "@/components/finance/account-form";
 
 export default async function ContasPage() {
-  const { accounts } = await loadBasics();
+  const { supabase, accounts } = await loadBasics();
+  const { data: totals } = await supabase.rpc("account_totals");
+  const totalBy = new Map(((totals ?? []) as { account_id: string; total: number }[]).map((t) => [t.account_id, Number(t.total)]));
   const groups = [
     { title: "Contas", icon: Landmark, items: accounts.filter((a) => a.kind === "checking") },
     { title: "Cartões de crédito", icon: CreditCard, items: accounts.filter((a) => a.kind === "credit_card") },
@@ -22,7 +24,7 @@ export default async function ContasPage() {
           </h2>
           <ul className="divide-y divide-border rounded-xl border border-border bg-surface">
             {g.items.map((a) => (
-              <AccountRow key={a.id} account={a} bankLabel={BANKS[a.bank]} />
+              <AccountRow key={a.id} account={a} bankLabel={BANKS[a.bank]} balance={a.initial_balance + (totalBy.get(a.id) ?? 0)} />
             ))}
           </ul>
         </section>

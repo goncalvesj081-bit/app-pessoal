@@ -63,10 +63,9 @@ export function AccountForm({ banks, kinds }: { banks: Record<Bank, string>; kin
           </label>
         </div>
       ) : (
-        <label className="block text-xs text-muted">
-          Saldo atual (opcional) — use o saldo do dia anterior ao primeiro extrato que vai importar
-          <input name="initial_balance" inputMode="decimal" placeholder="0,00" className="input mt-1" />
-        </label>
+        <p className="text-xs text-muted">
+          O saldo você informa depois: importe os extratos e então clique no lápis da conta e coloque o saldo que aparece hoje no app do banco.
+        </p>
       )}
       {error && <p className="text-sm text-danger">{error}</p>}
       <button disabled={pending} className="btn-primary flex items-center gap-1">
@@ -76,7 +75,7 @@ export function AccountForm({ banks, kinds }: { banks: Record<Bank, string>; kin
   );
 }
 
-export function AccountRow({ account: a, bankLabel }: { account: Account; bankLabel: string }) {
+export function AccountRow({ account: a, bankLabel, balance }: { account: Account; bankLabel: string; balance: number }) {
   const [editing, setEditing] = useState(false);
   const [pending, start] = useTransition();
 
@@ -99,13 +98,15 @@ export function AccountRow({ account: a, bankLabel }: { account: Account; bankLa
               <input name="due_day" type="number" min={1} max={31} defaultValue={a.due_day ?? ""} placeholder="Vence dia" className="input" aria-label="Vence dia" />
             </>
           ) : (
-            <input
-              name="initial_balance"
-              inputMode="decimal"
-              defaultValue={String(a.initial_balance).replace(".", ",")}
-              className="input sm:col-span-2"
-              aria-label="Saldo inicial"
-            />
+            <label className="text-xs text-muted sm:col-span-2">
+              Saldo atual (igual ao app do banco hoje)
+              <input
+                name="current_balance"
+                inputMode="decimal"
+                defaultValue={balance.toFixed(2).replace(".", ",")}
+                className="input mt-1"
+              />
+            </label>
           )}
           <div className="flex gap-2 sm:col-span-4">
             <button disabled={pending} className="btn-primary">Salvar</button>
@@ -124,7 +125,7 @@ export function AccountRow({ account: a, bankLabel }: { account: Account; bankLa
           {bankLabel}
           {a.kind === "credit_card"
             ? ` · fecha dia ${a.closing_day ?? "?"}, vence dia ${a.due_day ?? "?"}`
-            : ` · saldo inicial ${formatBRL(a.initial_balance)}`}
+            : ` · saldo ${formatBRL(balance)}`}
           {a.archived && " · arquivada"}
         </p>
       </div>

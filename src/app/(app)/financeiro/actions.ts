@@ -28,7 +28,7 @@ export async function createAccount(formData: FormData) {
     name: String(formData.get("name") ?? "").trim(),
     kind,
     bank: String(formData.get("bank") ?? "outro") as Bank,
-    initial_balance: kind === "credit_card" ? 0 : (num(formData.get("initial_balance")) ?? 0),
+    initial_balance: 0,
     closing_day: kind === "credit_card" ? day(formData.get("closing_day")) : null,
     due_day: kind === "credit_card" ? day(formData.get("due_day")) : null,
   });
@@ -39,7 +39,14 @@ export async function createAccount(formData: FormData) {
 export async function updateAccount(id: string, formData: FormData) {
   const supabase = await createClient();
   const fields: Record<string, unknown> = { name: String(formData.get("name") ?? "").trim() };
-  if (formData.has("initial_balance")) fields.initial_balance = num(formData.get("initial_balance")) ?? 0;
+  // Você informa o saldo ATUAL (o que aparece no app do banco hoje);
+  // o sistema calcula o saldo inicial = saldo atual - soma de tudo que foi lançado/importado.
+  const current = num(formData.get("current_balance"));
+  if (current !== null && Number.isFinite(current)) {
+    const { data: totals } = await supabase.rpc("account_totals");
+    const sum = Number(((totals ?? []) as { account_id: string; total: number }[]).find((t) => t.account_id === id)?.total ?? 0);
+    fields.initial_balance = Math.round((current - sum) * 100) / 100;
+  }
   if (formData.has("closing_day")) fields.closing_day = day(formData.get("closing_day"));
   if (formData.has("due_day")) fields.due_day = day(formData.get("due_day"));
   const { error } = await supabase.from("accounts").update(fields).eq("id", id);

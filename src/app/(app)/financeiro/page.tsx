@@ -118,7 +118,7 @@ export default async function FinanceiroPage({ searchParams }: { searchParams: P
               </ul>
             </>
           )}
-          <p className="text-xs text-muted">O saldo considera o saldo inicial que você informou + tudo que foi lançado/importado.</p>
+          <p className="text-xs text-muted">Saldo diferente do banco? Em Contas e cartões, clique no lápis e informe o saldo atual.</p>
         </section>
 
         <section className="card space-y-3">
