@@ -5,6 +5,8 @@ import { todayISO } from "@/lib/dates";
 import type { Task } from "@/lib/types";
 import { TaskList } from "@/components/task-item";
 import { TaskForm } from "@/components/task-form";
+import { formatBRL } from "@/lib/finance/money";
+import { monthRange, resolveMonth } from "@/lib/finance/data";
 
 function greeting() {
   const h = Number(
@@ -19,7 +21,8 @@ export default async function Dashboard() {
   const today = todayISO();
   const supabase = await createClient();
 
-  const [{ data: todayTasks }, { count: openCount }, { count: doneToday }] = await Promise.all([
+  const { start, end } = monthRange(resolveMonth(undefined));
+  const [{ data: todayTasks }, { count: openCount }, { count: doneToday }, { data: monthTx }, { data: cardAccounts }] = await Promise.all([
     supabase
       .from("tasks")
       .select("*")
@@ -33,7 +36,17 @@ export default async function Dashboard() {
       .select("*", { count: "exact", head: true })
       .eq("status", "done")
       .gte("completed_at", `${today}T00:00:00-03:00`),
+    supabase.from("transactions").select("account_id,amount").eq("kind", "normal").gte("date", start).lt("date", end),
+    supabase.from("accounts").select("id").eq("kind", "credit_card"),
   ]);
+  const cardIds = new Set((cardAccounts ?? []).map((a) => a.id));
+  let monthOut = 0;
+  let monthIn = 0;
+  for (const t of monthTx ?? []) {
+    const v = Number(t.amount);
+    if (v > 0 && !cardIds.has(t.account_id)) monthIn += v;
+    else monthOut -= v;
+  }
 
   const tasks = (todayTasks ?? []) as Task[];
   const overdue = tasks.filter((t) => t.due_date! < today).length;
@@ -70,7 +83,16 @@ export default async function Dashboard() {
 
       <div className="grid gap-3 sm:grid-cols-2">
         <Soon href="/agenda" icon={<CalendarDays size={18} />} title="Agenda" text="Compromissos do Google Agenda" />
-        <Soon href="/financeiro" icon={<Wallet size={18} />} title="Financeiro" text="Saldo e gastos do mês" />
+        <Link href="/financeiro" className="card flex items-center gap-3 hover:border-accent">
+          <Wallet size={18} className="text-muted" />
+          <div className="text-sm">
+            <p className="font-medium">Financeiro do mês</p>
+            <p className="text-xs text-muted">
+              Saídas <span className="tabular-nums text-danger">{formatBRL(monthOut)}</span> · Entradas{" "}
+              <span className="tabular-nums text-success">{formatBRL(monthIn)}</span>
+            </p>
+          </div>
+        </Link>
       </div>
     </div>
   );
